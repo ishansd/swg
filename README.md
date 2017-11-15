@@ -1,0 +1,2 @@
+# swg
+Sliced Wasserstein Generator
