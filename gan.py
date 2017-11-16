@@ -183,12 +183,12 @@ class gan():
       self.discriminator_loss = -tf.reduce_mean(self.y_hat) + tf.reduce_mean(self.y) + ddx
       self.generator_loss = tf.reduce_mean(self.y_hat)
 
-    tf.summary.scalar("discriminator_loss", self.discriminator_loss)
-    tf.summary.scalar("generator_loss", self.generator_loss)      
+    # tf.summary.scalar("discriminator_loss", self.discriminator_loss)
+    # tf.summary.scalar("generator_loss", self.generator_loss)      
 
     # We also track the sliced Wasserstein distance between the generated images and fake images
     self.sliced_wasserstein_distance = self.sw_loss(self.x, self.x_hat)
-    tf.summary.scalar("sliced_wasserstein_distance", self.sliced_wasserstein_distance)
+    # tf.summary.scalar("sliced_wasserstein_distance", self.sliced_wasserstein_distance)
       
     # Discriminator Optimizer
     discriminator_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='discriminator')
@@ -213,7 +213,7 @@ class gan():
     sess.run(tf.global_variables_initializer())
     saver = tf.train.Saver()
 
-    summary_writer = tf.summary.FileWriter(self.base_dir,sess.graph)
+    # summary_writer = tf.summary.FileWriter(self.base_dir,sess.graph)
 
     # Can be used later for computing, e.g., the KL divergence using the ITE toolbox.
     data_from_run = dict()
@@ -233,7 +233,7 @@ class gan():
             sess.run(self.d_optimizer, feed_dict={self.x: x, self.z: z})
 
         if (iteration)%50 == 0:
-          l = sess.run(self.generator_loss  , feed_dict={self.x: x, self.z: z})
+          l = sess.run(self.generator_loss, feed_dict={self.x: x, self.z: z})
           print(
            "Epoch {}, Time elapsed: {}, Loss at iteration {}: {}".format(
             epoch,time.time()-curr_time,iteration, l))
@@ -253,12 +253,12 @@ class gan():
       plt.savefig(self.base_dir+'/Epoch_{}.png'.format(epoch), bbox_inches='tight')
       plt.close()
 
-      summ  = sess.run(self.merged_summary_op, feed_dict={self.x: x, self.z: z})
-      summary_writer.add_summary(summ, iteration)
+      # summ  = sess.run(self.merged_summary_op, feed_dict={self.x: x, self.z: z})
+      # summary_writer.add_summary(summ, iteration)
       saver.save(sess,self.base_dir+'/checkpoint.ckpt')
 
       z = np.random.uniform(-1,1,size=[500, self.latent_dim])
-      x = self.data[np.ranomd.randint(0,self.max_examples,500)]
+      x = self.data[np.random.randint(0,self.max_examples,500)]
       samples_iter, projected_true, projected_fake = sess.run(
         [self.x_hat, self.y_to_match, self.y_hat_to_match], feed_dict={self.x: x, self.z: z})
       collected_samples.append(np.asarray(samples_iter))
