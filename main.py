@@ -7,17 +7,16 @@ import tensorflow as tf
 
 import argparse
 
-  
 def main(argv=None):
   parser = argparse.ArgumentParser(description='SWGAN')
 
+  parser.add_argument(
+    'gan_type', metavar='gan_type', help='GAN to use: SWGAN, OGAN, DGAN, WGAN', default='dgan')  
   parser.add_argument(
     'generator', metavar='generator_file_name', default='dcgan',help='Generator model to use')
   parser.add_argument(
     'discriminator', metavar='discriminator_file_name',default='d_dcgan', help='Discriminator model to use')
 
-  parser.add_argument(
-    'gan_type', metavar='gan_type', help='GAN to use: SWGAN, OGAN, DGAN, WGAN', default='dgan')  
   parser.add_argument(
     'name', metavar='output_folder_name', help='Output folder to use')
 
@@ -43,8 +42,6 @@ def main(argv=None):
     '--num_runs', metavar='number of runs', default=1, help='Number of different runs')
 
   args = parser.parse_args()
-  print(args.learning_rate)
-
 
   if int(args.num_runs) == 1:
     tf.reset_default_graph()
@@ -87,7 +84,6 @@ def main(argv=None):
         g.generate_images()      
       if args.images:
         g.generate_images()      
-
   return
 
 if __name__ == '__main__':

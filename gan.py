@@ -2,42 +2,56 @@ from __future__ import print_function
 
 import tensorflow as tf
 
-from tensorflow.python.client import timeline
-
 import numpy as np
-import scipy.stats as ss
 
+import cv2
+
+"""
+For saving plots on the cluster
+"""
 import matplotlib as mpl
 mpl.use('Agg')
 import matplotlib.pyplot as plt
 
-import tensorflow.contrib.layers as layers
-
+"""
+All generator and discriminator models are in folders
+generator_models/
+discriminator_models/
+Each model is in xyz.py, and must have a function named
+generator()
+discriminator()
+"""
 from generator_models import *
 from discriminator_models import *
+
 import time
 
-'''
-  Base class for GAN
-  The GAN can be one of the following:
-  1. Sliced Wasserstein GAN (swgan)
-  2. Original GAN (ogan)
-  3. GAN with -log D trick (dgan)
-  4. Wasserstein GAN (wgan)
-'''
+"""
+The generative model.
+  @params GAN type Either sliced Wasserstein GAN, or Wasserstein GAN
+  @params generator_model File name for generator model
+  @params discriminator_model File name for discriminator model
+  @params learning_rate LR for Adam Optimizer
+  @params max_epochs Max epochs to train
+  @params batch_size Equivalent to sample size for SW distance
+  @params num_theta Number of projections to use in every iteration
+  @params d_freq Relative frequency of generator:discriminator training
+  @params d_iter Number of successive iterations for training discriminator
+  @params model_name Output folder name
+"""
 class gan():
   def __init__(
       self, 
-      gan_type='swgan',
-      generator_model='fc',
-      discriminator_model='d_fc',
+      gan_type='swg',
+      generator_model='dcgan',
+      discriminator_model='layernorm_dcgan',
       learning_rate=2e-4,
-      max_epochs=10,
+      max_epochs=20,
       batch_size=64,
       num_theta=5000,
       dfreq=1,
       diter=1,
-      model_name='default_name'):
+      model_name='test_experiment'):
 
     np.random.seed(np.random.randint(0,10))
     tf.set_random_seed(np.random.randint(0,10))
@@ -48,6 +62,7 @@ class gan():
     
     self.gan_type = gan_type
 
+    # For input noise
     self.latent_dim = 100
 
     self.num_theta = num_theta
@@ -60,11 +75,9 @@ class gan():
     self.diter = diter
     self.dfreq = dfreq
 
-
-    if model_name == 'default_name':
-      model_name = gan_type + '_g_' + generator_model + '_d_' + discriminator_model
     self.generator_model = generator_model
-    self.discriminator_model = discriminator_model    
+    self.discriminator_model = discriminator_model
+
     self.base_dir = 'results/' + model_name
     import os
     import errno    
@@ -77,42 +90,36 @@ class gan():
 
     self.build_model()
 
-    print("Reading data for fixed")
+    print("Loading data into memory.")
     self.data = self.read_data()
     self.max_examples = self.data.shape[0]
-    print("Read data")
-
-
+    print("Loaded {} examples".format(self.max_examples))
     return  
 
-  '''
-    Read dataset
-  '''
+
+  """
+  Load the data
+    Assumes the data is in a single numpy array. Loads it into memory.
+  """
   def read_data(self):
-#    path = '/home/ideshpa2/data/celeba/celeba.npy'
     path = '/home/ideshpa2/data/lsun_64x64.npy'
-    print(path)
     im = np.load(path)
     return im
 
-  '''
-    Sliced-Wasserstein loss
-      Projects the images onto randomly chosen directions and computes the Wasserstein distance
-      between the two empirical distributions. The loss is the sum of the distances along all
-      such projections.
-      @params t_ Samples from the true distribution
-      @params f_ Samples from the generator
-      @params num_theta Number of random directions to project images onto 
-      @params reference If true, use a fixed set of directions. This will be used for comparison
-  '''
-  def sw_loss(self, t, f, num_theta=20000, reference=False):
-    # theta = np.random.randn(self.image_size, num_theta).astype(np.float32)
-    # normal_theta = theta / np.sqrt(np.sum(np.square(theta), axis=0, keepdims=True))
-
+  """
+  Sliced-Wasserstein loss
+    Projects the images onto randomly chosen directions and computes the Wasserstein distance
+    between the two empirical distributions. The loss is the sum of the distances along all
+    such projections.
+    @params t_ Samples from the true distribution
+    @params f_ Samples from the generator
+    @params num_theta Number of random directions to project images onto 
+    @params reference If true, use a fixed set of directions. This will be used for comparison
+  """
+  def sw_loss(self, t, f, reference=False):
     s = t.get_shape().as_list()[-1]
-    print(s)
 
-    theta = tf.random_normal(shape=[s, num_theta])
+    theta = tf.random_normal(shape=[s, self.num_theta])
     normal_theta = tf.nn.l2_normalize(theta, dim=0)
     
     x_t = tf.transpose(tf.matmul(t, normal_theta))
@@ -122,17 +129,17 @@ class gan():
     sorted_fake, fake_indices = tf.nn.top_k(x_f, self.batch_size)
  
     flat_true = tf.reshape(sorted_true,[-1])
-    rows = np.asarray([self.batch_size*int(np.floor(i*1.0/self.batch_size)) for i in range(num_theta*self.batch_size)])
+    rows = np.asarray([self.batch_size*int(np.floor(i*1.0/self.batch_size)) for i in range(self.num_theta*self.batch_size)])
     flat_idx = tf.reshape(fake_indices,[-1,1]) + np.reshape(rows,[-1,1])
 
-    shape = tf.constant([self.batch_size*num_theta])
-    rearranged_true = tf.reshape(tf.scatter_nd(flat_idx, flat_true, shape), [num_theta, self.batch_size])
+    shape = tf.constant([self.batch_size*self.num_theta])
+    rearranged_true = tf.reshape(tf.scatter_nd(flat_idx, flat_true, shape), [self.num_theta, self.batch_size])
  
     return tf.reduce_mean(tf.square(x_f - rearranged_true))
 
-  '''
-    Creates the computation graph
-  '''
+  """    
+  Creates the computation graph
+  """
   def build_model(self):
 
     # Input images from the TRUE distribution
@@ -152,41 +159,54 @@ class gan():
     self.y, self.y_to_match = discriminator(self.x)
     self.y_hat, self.y_hat_to_match = discriminator(self.x_hat, reuse=True)
 
-    true_loss = tf.nn.sigmoid_cross_entropy_with_logits( labels=tf.ones_like(self.y),
-                              logits=self.y)
-    fake_loss = tf.nn.sigmoid_cross_entropy_with_logits( labels=tf.zeros_like(self.y_hat),
-                              logits=self.y_hat)  
-    self.discriminator_loss = tf.reduce_mean(true_loss + fake_loss) 
+    if self.gan_type == "swg":
+      self.generator_loss = self.sw_loss(self.y_to_match, self.y_hat_to_match)
+      true_loss = tf.nn.sigmoid_cross_entropy_with_logits(
+        labels=tf.ones_like(self.y),
+        logits=self.y)
+      fake_loss = tf.nn.sigmoid_cross_entropy_with_logits(
+        labels=tf.zeros_like(self.y_hat),
+        logits=self.y_hat)  
+      self.discriminator_loss = tf.reduce_mean(true_loss + fake_loss) 
 
-    self.generator_loss = self.sw_loss(self.y_to_match, self.y_hat_to_match, num_theta=self.num_theta)
+    else: # gan == "wgan"
+      epsilon = tf.random_uniform([], 0.0, 1.0)
+      x_sample = epsilon * self.x + (1 - epsilon) * self.x_hat
+      d_hat = discriminator(x_sample,reuse=True)
+
+      ddx = tf.gradients(d_hat, x_sample)[0]
+      print("Gradients \n \n \n \n \n", ddx.get_shape().as_list())
+      ddx = tf.sqrt(tf.reduce_sum(tf.square(ddx), axis=1))
+      scale = 10
+      ddx = tf.reduce_mean(tf.square(ddx - 1.0) * scale)
+
+      self.discriminator_loss = -tf.reduce_mean(self.y_hat) + tf.reduce_mean(self.y) + ddx
+      self.generator_loss = tf.reduce_mean(self.y_hat)
 
     tf.summary.scalar("discriminator_loss", self.discriminator_loss)
+    tf.summary.scalar("generator_loss", self.generator_loss)      
+
+    # We also track the sliced Wasserstein distance between the generated images and fake images
+    self.sliced_wasserstein_distance = self.sw_loss(self.x, self.x_hat)
+    tf.summary.scalar("sliced_wasserstein_distance", self.sliced_wasserstein_distance)
       
     # Discriminator Optimizer
     discriminator_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='discriminator')
     self.d_optimizer = tf.train.AdamOptimizer(self.learning_rate, beta1=0.5).minimize(
       self.discriminator_loss,
       var_list = discriminator_vars)
-    self.discriminator_clip = [v.assign(tf.clip_by_value(v, -0.01, 0.01)) for v in discriminator_vars]
 
-    tf.summary.scalar("generator_loss", self.generator_loss)      
     self.g_optimizer = tf.train.AdamOptimizer(self.learning_rate, beta1=0.5).minimize(
       self.generator_loss,
       var_list = generator_vars)
 
-
-    self.grad = tf.gradients(self.generator_loss, self.z)
-
     self.merged_summary_op = tf.summary.merge_all()
     return
 
-  '''
-    Train the model using the optimizer created above. The number of iterations and the learning
-    rate is passed to the constructor. It periodically saves a checkpoint of the model, as well as
-    samples at that stage.
-  '''
+  """
+  Main training loop. Saves a checkpoint and sample images after every epoch.
+  """     
   def train(self):
-
     config=tf.ConfigProto()
     config.gpu_options.allow_growth = False
     sess = tf.Session(config=config) 
@@ -195,11 +215,12 @@ class gan():
 
     summary_writer = tf.summary.FileWriter(self.base_dir,sess.graph)
 
+    # Can be used later for computing, e.g., the KL divergence using the ITE toolbox.
     data_from_run = dict()
     collected_samples = []
 
     curr_time = time.time()
-    print("Starting 1 code " + self.gan_type)
+    print("Starting code " + self.gan_type)
     for epoch in range(self.max_epochs):  
       for iteration in range(int(self.max_examples/self.batch_size)):
  
@@ -211,54 +232,65 @@ class gan():
           for diter in range(self.diter):
             sess.run(self.d_optimizer, feed_dict={self.x: x, self.z: z})
 
-        # if (iteration+1)%50 == 0:
-        #   l,g = sess.run([self.generator_loss,self.grad]  , feed_dict={self.x: x, self.z: z})
-        #   g = np.mean(np.sum(np.square(g)))
-        #   print(
-        #    "Epoch {}, Time elapsed: {}, Loss at iteration {}: {}, Gradient: {}".format(epoch,time.time()-curr_time,iteration+1, l,g))
-        #   curr_time = time.time()
+        if (iteration)%50 == 0:
+          l = sess.run(self.generator_loss  , feed_dict={self.x: x, self.z: z})
+          print(
+           "Epoch {}, Time elapsed: {}, Loss at iteration {}: {}".format(
+            epoch,time.time()-curr_time,iteration, l))
+          curr_time = time.time()
 
-      im = self.get_random_samples(sess, num_samples = 64)
-      im = np.reshape(im,(-1, self.image_width,self.num_channels))
-      im = np.hstack(np.split(im,8))
+      im = self.get_random_samples(sess, num_samples = 36)
+      im = np.reshape(im,(-1, self.image_width, self.num_channels))
+      im = np.hstack(np.split(im,6))
+
+      # I made an error while creating the numpy array for LSUN, which swapped B and R
+      im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
+
       plt.imshow(im)
       plt.axis('off')
       fig = plt.gcf()
       fig.set_size_inches(12, 12)
       plt.savefig(self.base_dir+'/Epoch_{}.png'.format(epoch), bbox_inches='tight')
       plt.close()
+
+      summ  = sess.run(self.merged_summary_op, feed_dict={self.x: x, self.z: z})
+      summary_writer.add_summary(summ, iteration)
       saver.save(sess,self.base_dir+'/checkpoint.ckpt')
 
       z = np.random.uniform(-1,1,size=[500, self.latent_dim])
-      samples_iter = sess.run(self.x_hat, feed_dict={self.z: z})
+      x = self.data[np.ranomd.randint(0,self.max_examples,500)]
+      samples_iter, projected_true, projected_fake = sess.run(
+        [self.x_hat, self.y_to_match, self.y_hat_to_match], feed_dict={self.x: x, self.z: z})
       collected_samples.append(np.asarray(samples_iter))
+      collected_projected_true.append(np.asarray(projected_true))
+      collected_projected_fake.append(np.asarray(projected_fake))      
 
     data_from_run["reference"] = np.asarray(x)
     data_from_run["samples"] = np.asarray(collected_samples)
+    data_from_run["projected_true"] = np.asarray(collected_projected_true)
+    data_from_run["projected_fake"] = np.asarray(collected_projected_fake)     
 
     import pickle
 
     with open(self.base_dir+'/data_from_run.pickle', 'wb') as handle:
       pickle.dump(data_from_run, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-
     return
 
 
-  '''
-    Generates a set of random images from the generator 
-    @params sess a Tensorflow session
-  '''
+  """
+  Generates a set of random images from the generator 
+    @params sess Tensorflow session
+    @params num_samples Number of examples to generate
+  """
   def get_random_samples(self, sess, num_samples=100):
-
     code = np.random.uniform(-1,1,size=[num_samples,self.latent_dim])
     result = sess.run([(self.x_hat)], feed_dict={self.z: code})
-
     return result[0]
 
-
-  '''
-  '''
+  """
+  Method to generate samples using a pre-trained model 
+  """
   def generate_images(self):
     sess = tf.Session()
     sess.run(tf.global_variables_initializer())
@@ -267,12 +299,13 @@ class gan():
 
     im = self.get_random_samples(sess)
 
-    im = np.reshape(im[:64],(-1, self.image_width,self.num_channels))
-    im = np.hstack(np.split(im,8))
+    im = np.reshape(im[:36],(-1, self.image_width,self.num_channels))
+    im = np.hstack(np.split(im,6))
+    im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
     plt.imshow(im)
     plt.axis('off')
     fig = plt.gcf()
     fig.set_size_inches(12, 12)
-    plt.savefig(self.base_dir+ '/Final.png', bbox_inches='tight')
+    plt.savefig(self.base_dir+ '/Samples.png', bbox_inches='tight')
     plt.close()
     return
