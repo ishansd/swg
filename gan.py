@@ -200,7 +200,10 @@ class gan():
       self.generator_loss,
       var_list = generator_vars)
 
-    self.merged_summary_op = tf.summary.merge_all()
+    self.gradients = tf.reduce_mean(tf.square(tf.gradients(self.generator_loss, generator_vars)[0]))
+    print(self.gradients)
+
+    # self.merged_summary_op = tf.summary.merge_all()
     return
 
   """
@@ -218,6 +221,8 @@ class gan():
     # Can be used later for computing, e.g., the KL divergence using the ITE toolbox.
     data_from_run = dict()
     collected_samples = []
+    collected_projected_true = []
+    collected_projected_fake = []
 
     curr_time = time.time()
     print("Starting code " + self.gan_type)
