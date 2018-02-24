@@ -103,8 +103,11 @@ class gan():
   """
   def read_data(self):
     path = '/home/ideshpa2/data/lsun_64x64.npy'
+    path = '/home/ideshpa2/celeb_gan/cropped_celeba.npy'
     im = np.load(path)
+    im = np.reshape(im, [-1,self.image_size])
     return im
+
 
   """
   Sliced-Wasserstein loss
@@ -167,7 +170,7 @@ class gan():
       fake_loss = tf.nn.sigmoid_cross_entropy_with_logits(
         labels=tf.zeros_like(self.y_hat),
         logits=self.y_hat)  
-      self.discriminator_loss = tf.reduce_mean(true_loss + fake_loss) 
+      self.discriminator_loss = -self.generator_loss #tf.reduce_mean(true_loss + fake_loss) 
 
     else: # gan == "wgan"
       epsilon = tf.random_uniform([], 0.0, 1.0)
@@ -187,7 +190,7 @@ class gan():
     # tf.summary.scalar("generator_loss", self.generator_loss)      
 
     # We also track the sliced Wasserstein distance between the generated images and fake images
-    self.sliced_wasserstein_distance = self.sw_loss(self.x, self.x_hat)
+    # self.sliced_wasserstein_distance = self.sw_loss(self.x, self.x_hat)
     # tf.summary.scalar("sliced_wasserstein_distance", self.sliced_wasserstein_distance)
       
     # Discriminator Optimizer
@@ -249,7 +252,7 @@ class gan():
       im = np.hstack(np.split(im,6))
 
       # I made an error while creating the numpy array for LSUN, which swapped B and R
-      im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
+      # im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
 
       plt.imshow(im)
       plt.axis('off')
@@ -288,7 +291,7 @@ class gan():
     @params sess Tensorflow session
     @params num_samples Number of examples to generate
   """
-  def get_random_samples(self, sess, num_samples=100):
+  def get_random_samples(self, sess, num_samples=1000):
     code = np.random.uniform(-1,1,size=[num_samples,self.latent_dim])
     result = sess.run([(self.x_hat)], feed_dict={self.z: code})
     return result[0]
@@ -303,10 +306,11 @@ class gan():
     saver.restore(sess, tf.train.latest_checkpoint(self.base_dir + '/'))
 
     im = self.get_random_samples(sess)
+    np.save(self.base_dir+"/samples",im)
 
     im = np.reshape(im[:36],(-1, self.image_width,self.num_channels))
     im = np.hstack(np.split(im,6))
-    im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
+    # im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
     plt.imshow(im)
     plt.axis('off')
     fig = plt.gcf()
