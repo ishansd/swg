@@ -58,12 +58,14 @@ class flags_object():
 class swg():
 
     def __init__(self,
-                 flags=flags,
+                 flags=None,
                  model_name='test_experiment'):
 
         self.image_width = 64
         self.num_channels = 3
         self.image_size = self.num_channels * (self.image_width**2)
+
+        self.flags = flags
 
         self.base_dir = 'results/' + model_name
         import os
