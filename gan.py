@@ -294,7 +294,7 @@ def main(argv=None):
                         default=10000,
                         help='Number of iterations to train')
 
-    parser.add_argument('--num_theta',
+    parser.add_argument('--num_projections',
                         metavar='num projections',
                         default=5000,
                         help='Number of projections to use at every step')
