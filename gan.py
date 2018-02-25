@@ -107,7 +107,7 @@ class swg():
     def sw_loss(self, t, f):
         s = t.get_shape().as_list()[-1]
 
-        theta = tf.random_normal(shape=[s, self.flags.num_theta])
+        theta = tf.random_normal(shape=[s, self.flags.num_projections])
         normal_theta = tf.nn.l2_normalize(theta, dim=0)
 
         x_t = tf.transpose(tf.matmul(t, normal_theta))
