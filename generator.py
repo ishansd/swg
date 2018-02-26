@@ -6,7 +6,7 @@ def generator(z):
     batch_norm = layers.batch_norm
 
     h = z
-    with tf.variable_scope("generator") as scope:
+    with tf.variable_scope("generator", reuse=tf.AUTO_REUSE) as scope:
         h = layers.fully_connected(inputs=h,
                                    num_outputs=4 * 4 * 1024,
                                    activation_fn=tf.nn.relu,
