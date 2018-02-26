@@ -149,6 +149,7 @@ class swg():
             self.y, self.y_to_match = discriminator(self.x)
             self.y_hat, self.y_hat_to_match = discriminator(self.x_hat, reuse=True)
 
+
             true_loss = tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(self.y),
                                                                 logits=self.y)
             fake_loss = tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.zeros_like(self.y_hat),
@@ -162,7 +163,10 @@ class swg():
 
             self.d_optimizer = tf.train.AdamOptimizer(self.flags.learning_rate,
                                                       beta1=0.5).minimize(self.discriminator_loss,
-                                                                          var_list=discriminator_vars)
+                                                                            var_list=discriminator_vars)
+
+        else:
+            self.generator_loss = self.sw_loss(self.x, self.x_hat)
 
         generator_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='generator')
 
@@ -199,7 +203,7 @@ class swg():
         curr_time = time.time()
         print("Starting code")
         for iteration in range(int(self.flags.max_iters)):
-
+ 
             x = data[np.random.randint(0, max_examples, self.flags.batch_size)]
             z = np.random.uniform(-1, 1, size=[self.flags.batch_size, self.flags.latent_dim])
 
@@ -250,6 +254,7 @@ class swg():
         saver.restore(sess, tf.train.latest_checkpoint(self.base_dir + '/'))
 
         z = np.random.uniform(-1, 1, size=[36, self.flags.latent_dim])
+
         im = sess.run(self.x_hat, feed_dict={self.z: z})
 
         im = np.reshape(im, (-1, self.image_width, self.num_channels))
@@ -297,7 +302,7 @@ def main(argv=None):
 
     parser.add_argument('--use_discriminator',
                         dest='use_discriminator',
-                        action='store_true',
+                        action='store_true',                        
                         help='Enable discriminator')
 
     args = parser.parse_args()
