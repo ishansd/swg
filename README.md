@@ -1,4 +1,4 @@
-# swg
+# SWG
 Sliced Wasserstein Generator
 
 # Code tested with:
