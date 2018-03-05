@@ -22,30 +22,32 @@ from discriminator import discriminator
 import time
 
 """
-    flags
-    My wrapper for all hyperparameters. This will be passed to the generative model.
+    flags_wrapper
+    My wrapper around hyperparameters. This will be passed to the generative 
+    model.
 """
 
 
-class flags_object():
+class flags_wrapper():
 
-    def __init__(self,
-                 learning_rate=1e-4,
-                 batch_size=64,
-                 latent_dim=100,
-                 max_iters=10000,
-                 num_projections=20000,
-                 use_discriminator=True):
+    def __init__(
+            self,
+            learning_rate=1e-4,
+            batch_size=64,
+            latent_dim=100,
+            max_iters=10000,
+            num_projections=10000,
+            use_discriminator=True):
 
         self.learning_rate = learning_rate
-        self.batch_size = batch_size
-        self.max_iters = max_iters
+        self.batch_size = int(batch_size)
+        self.max_iters = int(max_iters)
 
         # For input noise
-        self.latent_dim = latent_dim
+        self.latent_dim = int(latent_dim)
 
         # SWG specific params
-        self.num_projections = num_projections
+        self.num_projections = int(num_projections)
         self.use_discriminator = use_discriminator
 
         return
@@ -54,14 +56,19 @@ class flags_object():
 """
     swg
     The generative model.
+
+    params:
+        flags: A flags_wrapper object with all hyperparams
+        model_name: Name for output folder. Will be created in "results/"     
 """
 
 
 class swg():
 
-    def __init__(self,
-                 flags=None,
-                 model_name='test_experiment'):
+    def __init__(
+            self,
+            flags=None,
+            model_name='test_experiment'):
 
         self.image_width = 64
         self.num_channels = 3
@@ -83,60 +90,101 @@ class swg():
 
         return
 
-    """
-  Load the data
-    Assumes the data is in a single numpy array. Loads it into memory.
-  """
+"""
+    read_data
+    Assumes the data is in a single numpy array. Loads it into memory. Can be 
+    replaced by tf queues.
+    todo: Read from disk
+
+    returns:
+        im: numpy array of flattened images [number of images, 64*64*3]
+"""
 
     def read_data(self):
         path = '/tmp/cropped_celeba.npy'
         im = np.load(path)
-        im = np.reshape(im, [-1, self.image_size])
         return im
 
-    """
-  Sliced-Wasserstein loss
-    Projects the images onto randomly chosen directions and computes the Wasserstein distance
-    between the two empirical distributions. The loss is the sum of the distances along all
-    such projections.
-    @params t_ Samples from the true distribution
-    @params f_ Samples from the generator
-    @params num_projections Number of random directions to project images onto
-    @params reference If true, use a fixed set of directions. This will be used for comparison
-  """
+"""
+    sw_loss
+    Computes the sliced Wasserstein distance between two sets of samples in the
+    following way:
+    1. Projects the samples onto random (Gaussian) directions (unit vectors).
+    2. For each direction, computes the Wasserstein-2 distance by sorting the 
+    two projected sets (which results in the lowest distance matching).
+    3. Adds distance over all directions.
 
-    def sw_loss(self, t, f):
+    NOTE:
+    This will create ops that require a fixed batch size.
+    
+    params:
+        t: Samples from the true distribution [batch size, disc. feature size]
+        f: Samples from the generator [batch size, disc. feature size]
+"""
+
+    def sw_loss(self, true_distribution, generated_distribution):
         s = t.get_shape().as_list()[-1]
 
+        # theta contains the projection directions as columns :
+        # [theta1, theta2, ...]
         theta = tf.random_normal(shape=[s, self.flags.num_projections])
-        normal_theta = tf.nn.l2_normalize(theta, dim=0)
+        theta = tf.nn.l2_normalize(theta, dim=0)
 
-        x_t = tf.transpose(tf.matmul(t, normal_theta))
-        x_f = tf.transpose(tf.matmul(f, normal_theta))
+        # project the samples (images). After being transposed, we have tensors
+        # of the format: [projected_image1, projected_image2, ...].
+        # Each row has the projections along one direction. This makes it
+        # easier for the sorting that follows.
+        projected_true = tf.transpose(
+            tf.matmul(true_distribution, theta))
 
-        sorted_true, _ = tf.nn.top_k(x_t, self.flags.batch_size)
-        sorted_fake, fake_indices = tf.nn.top_k(x_f, self.flags.batch_size)
+        projected_fake = tf.transpose(
+            tf.matmul(fake_distribution, theta))
 
+        sorted_true, indices_sorted_true = tf.nn.top_k(
+            x_t,
+            self.flags.batch_size)
+
+        sorted_fake, indices_sorted_fake = tf.nn.top_k(
+            x_f,
+            self.flags.batch_size)
+
+        # For faster gradient computation, we do not use sorted_fake to compute
+        # loss. Instead we re-order the sorted_true so that the samples from the
+        # true distribution go to the correct sample from the fake distribution.
+        # This is because Tensorflow did not have a GPU op for rearranging the
+        # gradients at the time of writing this code.
+
+        # It is less expensive (memory-wise) to rearrange arrays in TF.
+        # Flatten the sorted_true from [batch_size, num_projections].
         flat_true = tf.reshape(sorted_true, [-1])
-        rows = np.asarray([self.flags.batch_size * int(np.floor(i * 1.0 / self.flags.batch_size))
-                           for i in range(self.flags.num_projections * self.flags.batch_size)])
 
+        # Modify the indices to reflect this transition to an array.
+        # new index = row + index
+        rows = np.asarray(
+            [self.flags.batch_size * np.floor(i * 1.0 / self.flags.batch_size)
+             for i in range(self.flags.num_projections * self.flags.batch_size)])
+        rows = rows.astype(np.int32)
         flat_idx = tf.reshape(fake_indices, [-1, 1]) + np.reshape(rows, [-1, 1])
 
+        # The scatter operation takes care of reshaping to the rearranged matrix
         shape = tf.constant([self.flags.batch_size * self.flags.num_projections])
-        rearranged_true = tf.reshape(tf.scatter_nd(flat_idx, flat_true, shape),
-                                     [self.flags.num_projections, self.flags.batch_size])
+        rearranged_true = tf.reshape(
+            tf.scatter_nd(flat_idx, flat_true, shape),
+            [self.flags.num_projections, self.flags.batch_size])
 
-        return tf.reduce_mean(tf.square(x_f - rearranged_true))
+        return tf.reduce_mean(tf.square(projected_fake - rearranged_true))
 
-    """
-  Creates the computation graph
-  """
+"""
+    build_model
+    Creates the computation graph.
+"""
 
     def build_model(self):
 
-        # Input images from the TRUE distribution
-        self.x = tf.placeholder(tf.float32, [None, self.image_size])
+        # Input images from the true distribution
+        self.x = tf.placeholder(
+            tf.float32,
+            [None, self.image_width, self.image_width, self.num_channels])
 
         # Latent variable
         self.z = tf.placeholder(tf.float32, [None, self.flags.latent_dim])
@@ -145,41 +193,54 @@ class swg():
         self.x_hat = generator(self.z)
 
         if self.flags.use_discriminator:
-            print("Using discriminator")
+            # The discriminator returns the output (unnormalized) probability
+            # of fake/true, and also a feature vector for the image.
             self.y, self.y_to_match = discriminator(self.x)
-            self.y_hat, self.y_hat_to_match = discriminator(self.x_hat, reuse=True)
+            self.y_hat, self.y_hat_to_match = discriminator(
+                self.x_hat,
+                reuse=True)
 
-
-            true_loss = tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(self.y),
-                                                                logits=self.y)
-            fake_loss = tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.zeros_like(self.y_hat),
-                                                                logits=self.y_hat)
+            # The discriminator is trained for simple binary classification.
+            true_loss = tf.nn.sigmoid_cross_entropy_with_logits(
+                labels=tf.ones_like(self.y),
+                logits=self.y)
+            fake_loss = tf.nn.sigmoid_cross_entropy_with_logits(
+                labels=tf.zeros_like(self.y_hat),
+                logits=self.y_hat)
             self.discriminator_loss = tf.reduce_mean(true_loss + fake_loss)
 
-            discriminator_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES,
-                                                   scope='discriminator')
+            discriminator_vars = tf.get_collection(
+                tf.GraphKeys.GLOBAL_VARIABLES,
+                scope='discriminator')
+            self.d_optimizer = tf.train.AdamOptimizer(
+                self.flags.learning_rate,
+                beta1=0.5).minimize(self.discriminator_loss,
+                                    var_list=discriminator_vars)
 
-            self.generator_loss = self.sw_loss(self.y_to_match, self.y_hat_to_match)
-
-            self.d_optimizer = tf.train.AdamOptimizer(self.flags.learning_rate,
-                                                      beta1=0.5).minimize(self.discriminator_loss,
-                                                                            var_list=discriminator_vars)
+            self.generator_loss = self.sw_loss(
+                self.y_to_match,
+                self.y_hat_to_match)
 
         else:
-            self.generator_loss = self.sw_loss(self.x, self.x_hat)
+            self.generator_loss = self.sw_loss(
+                tf.reshape(self.x, [self.flags.batch_size, -1]),
+                tf.reshape(self.x_hat, [self.flags.batch_size, -1]))
 
-        generator_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='generator')
-
-        self.g_optimizer = tf.train.AdamOptimizer(self.flags.learning_rate,
-                                                  beta1=0.5).minimize(self.generator_loss,
-                                                                      var_list=generator_vars)
+        generator_vars = tf.get_collection(
+            tf.GraphKeys.GLOBAL_VARIABLES,
+            scope='generator')
+        self.g_optimizer = tf.train.AdamOptimizer(
+            self.flags.learning_rate,
+            beta1=0.5).minimize(self.generator_loss,
+                                var_list=generator_vars)
 
         # self.merged_summary_op = tf.summary.merge_all()
         return
 
-    """
-  Main training loop. Saves a checkpoint and sample images after every epoch.
-  """
+"""
+    train
+    Main training loop. Saves a checkpoint and sample images periodically.
+"""
 
     def train(self):
         dfreq = 1
@@ -198,27 +259,33 @@ class swg():
 
         sess.run(tf.global_variables_initializer())
 
+        # Prefer not to use summaries, they seem to slow down execution over
+        # time.
         # summary_writer = tf.summary.FileWriter(self.base_dir,sess.graph)
 
         curr_time = time.time()
         print("Starting code")
-        for iteration in range(int(self.flags.max_iters)):
- 
+        for iteration in range(self.flags.max_iters):
+
             x = data[np.random.randint(0, max_examples, self.flags.batch_size)]
-            z = np.random.uniform(-1, 1, size=[self.flags.batch_size, self.flags.latent_dim])
+            z = np.random.uniform(-1, 1, size=[self.flags.batch_size,
+                                               self.flags.latent_dim])
 
             sess.run(self.g_optimizer, feed_dict={self.x: x, self.z: z})
 
             if self.flags.use_discriminator:
                 if iteration % dfreq == 0:
                     for diteration in range(diter):
-                        sess.run(self.d_optimizer, feed_dict={self.x: x, self.z: z})
+                        sess.run(self.d_optimizer, feed_dict={self.x: x,
+                                                              self.z: z})
 
             if iteration % 50 == 0:
-                l = sess.run(self.generator_loss, feed_dict={self.x: x, self.z: z})
-                print("Time elapsed: {}, Loss at iteration {}: {}".format(time.time() - curr_time,
-                                                                          iteration,
-                                                                          l))
+                loss = sess.run(self.generator_loss, feed_dict={self.x: x,
+                                                                self.z: z})
+                print("Time elapsed: {}, Loss after iteration {}: {}".format(
+                    time.time() - curr_time,
+                    iteration,
+                    loss))
                 curr_time = time.time()
 
             if iteration % 1000 == 0:
@@ -227,15 +294,13 @@ class swg():
                 im = np.reshape(im, (-1, self.image_width, self.num_channels))
                 im = np.hstack(np.split(im, 6))
 
-                # I made an error while creating the numpy array for LSUN, which swapped B and R
-                # im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
-
                 plt.imshow(im)
                 plt.axis('off')
                 fig = plt.gcf()
                 fig.set_size_inches(12, 12)
-                plt.savefig(self.base_dir + '/Iteration_{}.png'.format(iteration),
-                            bbox_inches='tight')
+                plt.savefig(self.base_dir + '/Iteration_{}.png'.format(
+                    iteration),
+                    bbox_inches='tight')
                 plt.close()
 
             if iteration % 10000 == 0:
@@ -243,9 +308,10 @@ class swg():
 
         return
 
-    """
-  Method to generate samples using a pre-trained model 
-  """
+"""
+    generate_images
+    Method to generate samples using a pre-trained model 
+"""
 
     def generate_images(self):
         sess = tf.Session()
@@ -259,7 +325,7 @@ class swg():
 
         im = np.reshape(im, (-1, self.image_width, self.num_channels))
         im = np.hstack(np.split(im, 6))
-        # im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
+
         plt.imshow(im)
         plt.axis('off')
         fig = plt.gcf()
@@ -273,51 +339,59 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description='SWGAN')
 
     parser.add_argument(
-        '--name', metavar='output folder', default="test", help='Output folder')
+        '--name',
+        metavar='output folder',
+        default="test",
+        help='Output folder')
 
-    parser.add_argument('--train',
-                        dest='train',
-                        action='store_true',
-                        help='Use to train')
+    parser.add_argument(
+        '--train',
+        dest='train',
+        action='store_true',
+        help='Use to train')
 
-    parser.add_argument('--learning_rate',
-                        metavar='learning rate',
-                        default=1e-4,
-                        help='Learning rate for optimizer')
+    parser.add_argument(
+        '--learning_rate',
+        metavar='learning rate',
+        default=1e-4,
+        help='Learning rate for optimizer')
 
-    parser.add_argument('--max_iters',
-                        metavar='max iters',
-                        default=10000,
-                        help='Number of iterations to train')
+    parser.add_argument(
+        '--max_iters',
+        metavar='max iters',
+        default=10000,
+        help='Number of iterations to train')
 
-    parser.add_argument('--num_projections',
-                        metavar='num projections',
-                        default=10000,
-                        help='Number of projections to use at every step')
+    parser.add_argument(
+        '--num_projections',
+        metavar='num projections',
+        default=10000,
+        help='Number of projections to use at every step')
 
-    parser.add_argument('--batch_size',
-                        metavar='batch size',
-                        default=64,
-                        help='Batch size')
+    parser.add_argument(
+        '--batch_size',
+        metavar='batch size',
+        default=64,
+        help='Batch size')
 
-    parser.add_argument('--use_discriminator',
-                        dest='use_discriminator',
-                        action='store_true',                        
-                        help='Enable discriminator')
+    parser.add_argument(
+        '--use_discriminator',
+        dest='use_discriminator',
+        action='store_true',
+        help='Enable discriminator')
 
     args = parser.parse_args()
-
-    print((args.use_discriminator))
 
     np.random.seed(np.random.randint(0, 10))
     tf.set_random_seed(np.random.randint(0, 10))
     tf.reset_default_graph()
 
-    flags = flags_object(learning_rate=args.learning_rate,
-                         max_iters=args.max_iters,
-                         batch_size=args.batch_size,
-                         num_projections=args.num_projections,
-                         use_discriminator=args.use_discriminator)
+    flags = flags_wrapper(
+        learning_rate=args.learning_rate,
+        max_iters=args.max_iters,
+        batch_size=args.batch_size,
+        num_projections=args.num_projections,
+        use_discriminator=args.use_discriminator)
 
     g = swg(model_name=args.name, flags=flags)
 
