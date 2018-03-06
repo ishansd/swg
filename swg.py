@@ -24,23 +24,20 @@ import time
 from utils.flags_wrapper import flags_wrapper
 
 
-"""
-    swg
+class swg():
+    """swg
     The generative model.
 
     params:
         flags: A flags_wrapper object with all hyperparams
         model_name: Name for output folder. Will be created in "results/"     
-"""
-
-
-class swg():
+    """
 
     def __init__(
             self,
             flags=None,
             model_name='test_experiment'):
-
+        """initialization """
         self.image_width = 64
         self.num_channels = 3
         self.image_size = self.num_channels * (self.image_width**2)
@@ -52,6 +49,7 @@ class swg():
         import errno
 
         try:
+            ""
             os.makedirs(self.base_dir)
         except OSError as exc:  # Python >2.5
             if exc.errno == errno.EEXIST and os.path.isdir(self.base_dir):
@@ -61,23 +59,23 @@ class swg():
 
         return
 
-"""
-    read_data
+    """read_data
     Assumes the data is in a single numpy array. Loads it into memory. Can be 
     replaced by tf queues.
     todo: Read from disk
 
+    params: None
+
     returns:
-        im: numpy array of flattened images [number of images, 64*64*3]
-"""
+        im: numpy array of flattened images [number of images, 64*64*3] 
+    """
 
     def read_data(self):
-        path = '/tmp/cropped_celeba.npy'
+        path = '/home/ideshpa2/celeb_gan/cropped_celeba.npy'
         im = np.load(path)
         return im
 
-"""
-    sw_loss
+    """sw_loss
     Computes the sliced Wasserstein distance between two sets of samples in the
     following way:
     1. Projects the samples onto random (Gaussian) directions (unit vectors).
@@ -89,12 +87,17 @@ class swg():
     This will create ops that require a fixed batch size.
     
     params:
-        t: Samples from the true distribution [batch size, disc. feature size]
-        f: Samples from the generator [batch size, disc. feature size]
-"""
+        true_distribution: Samples from the true distribution 
+            [batch size, disc. feature size]
+        generated_distribution: Samples from the generator 
+            [batch size, disc. feature size]
+
+    returns:
+        sliced Wasserstein distance
+    """
 
     def sw_loss(self, true_distribution, generated_distribution):
-        s = t.get_shape().as_list()[-1]
+        s = true_distribution.get_shape().as_list()[-1]
 
         # theta contains the projection directions as columns :
         # [theta1, theta2, ...]
@@ -109,14 +112,14 @@ class swg():
             tf.matmul(true_distribution, theta))
 
         projected_fake = tf.transpose(
-            tf.matmul(fake_distribution, theta))
+            tf.matmul(generated_distribution, theta))
 
-        sorted_true, indices_sorted_true = tf.nn.top_k(
-            x_t,
+        sorted_true, true_indices = tf.nn.top_k(
+            projected_true,
             self.flags.batch_size)
 
-        sorted_fake, indices_sorted_fake = tf.nn.top_k(
-            x_f,
+        sorted_fake, fake_indices = tf.nn.top_k(
+            projected_fake,
             self.flags.batch_size)
 
         # For faster gradient computation, we do not use sorted_fake to compute
@@ -145,10 +148,9 @@ class swg():
 
         return tf.reduce_mean(tf.square(projected_fake - rearranged_true))
 
-"""
-    build_model
+    """build_model
     Creates the computation graph.
-"""
+    """
 
     def build_model(self):
 
@@ -194,8 +196,8 @@ class swg():
 
         else:
             self.generator_loss = self.sw_loss(
-                tf.reshape(self.x, [self.flags.batch_size, -1]),
-                tf.reshape(self.x_hat, [self.flags.batch_size, -1]))
+                tf.reshape(self.x, [-1, self.image_size]),
+                tf.reshape(self.x_hat, [-1, self.image_size]))
 
         generator_vars = tf.get_collection(
             tf.GraphKeys.GLOBAL_VARIABLES,
@@ -208,10 +210,9 @@ class swg():
         # self.merged_summary_op = tf.summary.merge_all()
         return
 
-"""
-    train
+    """train
     Main training loop. Saves a checkpoint and sample images periodically.
-"""
+    """
 
     def train(self):
         dfreq = 1
@@ -279,10 +280,9 @@ class swg():
 
         return
 
-"""
-    generate_images
+    """generate_images
     Method to generate samples using a pre-trained model 
-"""
+    """
 
     def generate_images(self):
         sess = tf.Session()
