@@ -14,3 +14,5 @@ Argparse
 
 Matplotlib
 
+# For running options:
+python3 swg.py -h
