@@ -1,11 +1,10 @@
-"""
-    flags_wrapper
-    My wrapper around hyperparameters. This will be passed to the generative 
-    model.
-"""
 
 
 class flags_wrapper():
+    """flags_wrapper
+        My wrapper around hyperparameters. This will be passed to the generative 
+        model.
+    """
 
     def __init__(
             self,

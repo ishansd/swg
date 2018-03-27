@@ -37,7 +37,8 @@ class swg():
             self,
             flags=None,
             model_name='test_experiment'):
-        """initialization """
+        """initialization 
+        """
         self.image_width = 64
         self.num_channels = 3
         self.image_size = self.num_channels * (self.image_width**2)
@@ -59,50 +60,48 @@ class swg():
 
         return
 
-    """read_data
-    Assumes the data is in a single numpy array. Loads it into memory. Can be 
-    replaced by tf queues.
-    todo: Read from disk
-
-    params: None
-
-    returns:
-        im: numpy array of flattened images [number of images, 64*64*3] 
-    """
-
     def read_data(self):
-        path = '/home/ideshpa2/celeb_gan/cropped_celeba.npy'
+        """read_data
+        Assumes the data is in a single numpy array. Loads it into memory. Can be 
+        replaced by tf queues.
+        todo: Read from disk
+
+        params: None
+
+        returns:
+            im: numpy array of flattened images [number of images, 64*64*3] 
+        """
+        path = '/tmp/cropped_celeba.npy'
         im = np.load(path)
         return im
 
-    """sw_loss
-    Computes the sliced Wasserstein distance between two sets of samples in the
-    following way:
-    1. Projects the samples onto random (Gaussian) directions (unit vectors).
-    2. For each direction, computes the Wasserstein-2 distance by sorting the 
-    two projected sets (which results in the lowest distance matching).
-    3. Adds distance over all directions.
-
-    NOTE:
-    This will create ops that require a fixed batch size.
-    
-    params:
-        true_distribution: Samples from the true distribution 
-            [batch size, disc. feature size]
-        generated_distribution: Samples from the generator 
-            [batch size, disc. feature size]
-
-    returns:
-        sliced Wasserstein distance
-    """
-
     def sw_loss(self, true_distribution, generated_distribution):
+        """sw_loss
+        Computes the sliced Wasserstein distance between two sets of samples in the
+        following way:
+        1. Projects the samples onto random (Gaussian) directions (unit vectors).
+        2. For each direction, computes the Wasserstein-2 distance by sorting the 
+        two projected sets (which results in the lowest distance matching).
+        3. Adds distance over all directions.
+
+        NOTE:
+        This will create ops that require a fixed batch size.
+
+        params:
+            true_distribution: Samples from the true distribution 
+                [batch size, disc. feature size]
+            generated_distribution: Samples from the generator 
+                [batch size, disc. feature size]
+
+        returns:
+            sliced Wasserstein distance
+        """
         s = true_distribution.get_shape().as_list()[-1]
 
         # theta contains the projection directions as columns :
         # [theta1, theta2, ...]
         theta = tf.random_normal(shape=[s, self.flags.num_projections])
-        theta = tf.nn.l2_normalize(theta, dim=0)
+        theta = tf.nn.l2_normalize(theta, axis=0)
 
         # project the samples (images). After being transposed, we have tensors
         # of the format: [projected_image1, projected_image2, ...].
@@ -148,11 +147,10 @@ class swg():
 
         return tf.reduce_mean(tf.square(projected_fake - rearranged_true))
 
-    """build_model
-    Creates the computation graph.
-    """
-
     def build_model(self):
+        """build_model
+        Creates the computation graph.
+        """
 
         # Input images from the true distribution
         self.x = tf.placeholder(
@@ -210,11 +208,10 @@ class swg():
         # self.merged_summary_op = tf.summary.merge_all()
         return
 
-    """train
-    Main training loop. Saves a checkpoint and sample images periodically.
-    """
-
     def train(self):
+        """train
+        Main training loop. Saves a checkpoint and sample images periodically.
+        """
         dfreq = 1
         diter = 1
 
@@ -240,28 +237,36 @@ class swg():
         for iteration in range(self.flags.max_iters):
 
             x = data[np.random.randint(0, max_examples, self.flags.batch_size)]
-            z = np.random.uniform(-1, 1, size=[self.flags.batch_size,
-                                               self.flags.latent_dim])
+            z = np.random.uniform(
+                low=-1,
+                high=1,
+                size=[self.flags.batch_size, self.flags.latent_dim])
 
             sess.run(self.g_optimizer, feed_dict={self.x: x, self.z: z})
 
             if self.flags.use_discriminator:
                 if iteration % dfreq == 0:
                     for diteration in range(diter):
-                        sess.run(self.d_optimizer, feed_dict={self.x: x,
-                                                              self.z: z})
+                        sess.run(
+                            self.d_optimizer,
+                            feed_dict={self.x: x, self.z: z})
 
             if iteration % 50 == 0:
-                loss = sess.run(self.generator_loss, feed_dict={self.x: x,
-                                                                self.z: z})
-                print("Time elapsed: {}, Loss after iteration {}: {}".format(
-                    time.time() - curr_time,
-                    iteration,
-                    loss))
+                loss = sess.run(
+                    self.generator_loss,
+                    feed_dict={self.x: x, self.z: z})
+                print(
+                    "Time elapsed: {}, Loss after iteration {}: {}".format(
+                        time.time() - curr_time,
+                        iteration,
+                        loss))
                 curr_time = time.time()
 
             if iteration % 1000 == 0:
-                z = np.random.uniform(-1, 1, size=[36, self.flags.latent_dim])
+                z = np.random.uniform(
+                    low=-1,
+                    high=1,
+                    size=[36, self.flags.latent_dim])
                 im = sess.run(self.x_hat, feed_dict={self.z: z})
                 im = np.reshape(im, (-1, self.image_width, self.num_channels))
                 im = np.hstack(np.split(im, 6))
@@ -280,17 +285,19 @@ class swg():
 
         return
 
-    """generate_images
-    Method to generate samples using a pre-trained model 
-    """
-
     def generate_images(self):
+        """generate_images
+        Method to generate samples using a pre-trained model 
+        """
         sess = tf.Session()
         sess.run(tf.global_variables_initializer())
         saver = tf.train.Saver()
         saver.restore(sess, tf.train.latest_checkpoint(self.base_dir + '/'))
 
-        z = np.random.uniform(-1, 1, size=[36, self.flags.latent_dim])
+        z = np.random.uniform(
+            low=-1,
+            high=1,
+            size=[36, self.flags.latent_dim])
 
         im = sess.run(self.x_hat, feed_dict={self.z: z})
 
@@ -303,6 +310,58 @@ class swg():
         fig.set_size_inches(12, 12)
         plt.savefig(self.base_dir + '/Samples.png', bbox_inches='tight')
         plt.close()
+        return
+
+    def generate_tsne(self):
+        """generate_tsne
+        Method to visualize TSNE with random samples from the ground truth and
+        generated distribution. This might help in catching mode collapse. If
+        there is an obvious case of mode collapse, then we should see several
+        points from the ground truth without any generated samples nearby.
+        Purely a sanity check.
+        """
+        from sklearn.manifold import TSNE
+
+        num_points = 1000
+        data = self.read_data()[:num_points]
+        data = np.reshape(data, [num_points, -1])
+
+        print("Loaded ground truth.")
+
+        sess = tf.Session()
+        sess.run(tf.global_variables_initializer())
+        saver = tf.train.Saver()
+        saver.restore(sess, tf.train.latest_checkpoint(self.base_dir + '/'))
+        z = np.random.uniform(-1, 1, size=[num_points, self.flags.latent_dim])
+
+        generated = sess.run(self.x_hat, feed_dict={self.z: z})
+        generated = np.reshape(generated, [num_points, -1])
+
+        X = np.vstack((data, generated))
+
+        print("Computing TSNE.")
+        X_embedded = TSNE(n_components=2).fit_transform(X)
+        print("Plotting data.")
+
+        plt.scatter(
+            X_embedded[:num_points, 0],
+            X_embedded[:num_points, 1],
+            color='r',
+            label='GT')
+
+        plt.scatter(
+            X_embedded[num_points:, 0],
+            X_embedded[num_points:, 1],
+            color='b',
+            label='Generated',
+            alpha=0.25)
+
+        plt.axis('off')
+        fig = plt.gcf()
+        fig.set_size_inches(12, 12)
+        plt.savefig(self.base_dir + '/TSNE.png', bbox_inches='tight')
+        plt.close()
+
         return
 
 
@@ -369,7 +428,7 @@ def main(argv=None):
     if args.train:
         g.train()
     g.generate_images()
-
+    g.generate_tsne()
     return
 
 if __name__ == '__main__':
