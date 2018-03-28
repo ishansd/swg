@@ -14,5 +14,7 @@ Argparse
 
 Matplotlib
 
+Opencv-python
+
 # For running options:
 python3 swg.py -h
