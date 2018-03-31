@@ -1,6 +1,8 @@
 # SWG
 Sliced Wasserstein Generator
 
+https://arxiv.org/abs/1803.11188
+
 # Code tested with:
 Python 3.6.4
 
