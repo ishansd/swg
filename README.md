@@ -1,6 +1,9 @@
 # SWG
 Sliced Wasserstein Generator
 
+![alt text](https://raw.githubusercontent.com/ishansd/swg/master/samples/lsun_examples.png)
+
+
 https://arxiv.org/abs/1803.11188
 
 # Code tested with:
